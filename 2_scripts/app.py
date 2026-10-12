@@ -3,25 +3,24 @@
 珠三角房产智能问答系统 - 带多轮对话记忆 + 混合检索 + 结构化过滤
 """
 
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "rag"))
+import _offline_setup  # noqa: F401  必须早于 hybrid_retriever/sentence_transformers
+
 import streamlit as st
 import chromadb
-import os
 import requests
 import json
-import sys
 import re
 from dotenv import load_dotenv
 
 load_dotenv()
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "rag"))
-
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
-
 MODEL_NAME = "all-MiniLM-L6-v2"
-CHROMA_PATH = r"D:\MyProject\house_data_RAG\1_data\chroma_db"
+BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+CHROMA_PATH = os.path.join(BASE_PATH, "1_data", "chroma_db")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
 
@@ -125,10 +124,19 @@ def retrieve_houses(question, n_results=5):
     if results:
         context_lines = []
         for i, r in enumerate(results, 1):
+            # 空字段读回来是 NaN，直接拼进 prompt 会变成字面的 "nan"
+            def txt(key):
+                v = r.get(key)
+                if v is None:
+                    return ''
+                if isinstance(v, float) and pd.isna(v):
+                    return ''
+                s = str(v).strip()
+                return '' if s.lower() == 'nan' else s
             line = (
-                f"{i}. {r.get('小区名称')}（{r.get('城市')}{r.get('区域')}）"
-                f"{r.get('户型')} {r.get('面积')}㎡，"
-                f"总价{r.get('总价')}万元，单价{r.get('单价')}元/㎡"
+                f"{i}. {txt('小区名称')}（{txt('城市')}{txt('区域')}）"
+                f"{txt('户型')} {txt('面积')}㎡，"
+                f"总价{txt('总价')}万元，单价{txt('单价')}元/㎡"
             )
             context_lines.append(line)
         return "\n".join(context_lines), results, filters
@@ -221,8 +229,11 @@ if question:
             expander_title = expander_title + "（" + "，".join(filter_info) + "）"
         with st.expander(expander_title):
             for meta in metadatas:
-                st.write("**" + meta.get('小区名称', '') + "**（" + meta.get('城市', '') + meta.get('区域', '') + "）")
-                st.write("   " + meta.get('户型', '') + " " + str(meta.get('面积', 0)) + "㎡ | 总价" + str(meta.get('总价', 0)) + "万元")
+                disp = {k: ('' if (v is None or (isinstance(v, float) and pd.isna(v))
+                                    or str(v).strip().lower() == 'nan') else str(v))
+                        for k, v in meta.items()}
+                st.write("**" + disp.get('小区名称', '') + "**（" + disp.get('城市', '') + disp.get('区域', '') + "）")
+                st.write("   " + disp.get('户型', '') + " " + disp.get('面积', '0') + "㎡ | 总价" + disp.get('总价', '0') + "万元")
 
 with st.sidebar:
     st.markdown("### 控制面板")

@@ -19,7 +19,7 @@ load_dotenv()
 from push_report import push_report
 
 # ==================== 配置 ====================
-BASE_PATH = r"D:\MyProject\house_data_RAG"
+BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 CSV_PATH = os.path.join(BASE_PATH, "1_data", "cleaned_data", "house_cleaned.csv")
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
@@ -34,11 +34,11 @@ def load_data():
     return df
 
 
-def calc_weekly_stats(df):
+def calc_weekly_stats(df, as_of=None):
     """
     统计本周（最近7天）数据
     """
-    today = datetime.datetime.now()
+    today = as_of or datetime.datetime.now()
     week_start = (today - datetime.timedelta(days=7)).strftime('%Y-%m-%d')
     last_week_start = (today - datetime.timedelta(days=14)).strftime('%Y-%m-%d')
     last_week_end = (today - datetime.timedelta(days=8)).strftime('%Y-%m-%d')
@@ -155,25 +155,65 @@ def generate_weekly_report(stats):
         return "生成周报失败: " + str(e)
 
 
-def main():
-    print("开始生成周报 " + datetime.datetime.now().strftime('%Y-%m-%d') + "...")
+def _parse_as_of(text):
+    """把 YYYY-MM-DD 或 YYYYMMDD 解析成 datetime；不传就用当前时间。"""
+    if not text:
+        return None
+    text = text.strip()
+    for fmt in ('%Y-%m-%d', '%Y%m%d'):
+        try:
+            return datetime.datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    raise ValueError("无法解析日期: " + text + "（应为 YYYY-MM-DD 或 YYYYMMDD）")
+
+
+def save_report(content, as_of):
+    """把报表写到 1_data/reports/周报_YYYYMMDD.md（原来只推不存，现在补上落盘）。"""
+    reports_dir = os.path.join(BASE_PATH, "1_data", "reports")
+    os.makedirs(reports_dir, exist_ok=True)
+    path = os.path.join(reports_dir, "周报_" + as_of.strftime('%Y%m%d') + ".md")
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    return path
+
+
+def main(argv=None):
+    import argparse
+    parser = argparse.ArgumentParser(description="生成房产市场周报")
+    parser.add_argument("--as-of", dest="as_of",
+                        help="把'今天'当成指定日期来统计（YYYY-MM-DD 或 YYYYMMDD），用于回溯测试")
+    parser.add_argument("--dry-run", action="store_true", help="只生成并保存文件，不推送钉钉/邮件")
+    args = parser.parse_args(argv)
+
+    as_of_dt = _parse_as_of(args.as_of)
+    now = as_of_dt or datetime.datetime.now()
+    print("开始生成周报 " + now.strftime('%Y-%m-%d') + ("（--as-of 指定）" if as_of_dt else "") + "...")
 
     df = load_data()
     print("   - 全量数据: " + str(len(df)) + " 条")
 
-    stats = calc_weekly_stats(df)
+    stats = calc_weekly_stats(df, as_of=as_of_dt)
     if stats is None:
-        print("本周没有新数据，不生成周报")
-        return
+        print("该日期窗口内没有新数据，不生成周报。提示：可用 --as-of 指定有数据的日期。")
+        return 0
 
     print("   - 本周新增: " + str(stats['this_week']['新增房源数']) + " 条")
     print("   - 日均新增: " + str(stats['avg_daily']) + " 套/天")
 
-    print("正在生成周报...")
+    print("正在生成周报（调用 DeepSeek）...")
     content = generate_weekly_report(stats)
 
+    path = save_report(content, now)
+    print("   - 已保存: " + path + "（" + str(len(content)) + " 字符）")
+
+    if args.dry_run:
+        print("   - --dry-run：跳过推送")
+        return 0
+
     push_report(content, "周报")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

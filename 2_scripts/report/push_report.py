@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ==================== 配置 ====================
-BASE_PATH = r"D:\MyProject\house_data_RAG"
+BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 
 DINGTALK_WEBHOOK = os.getenv("DINGTALK_WEBHOOK", "")
 DINGTALK_SECRET = os.getenv("DINGTALK_SECRET", "")
@@ -98,6 +98,10 @@ def send_email(content, report_type="日报"):
         today = datetime.datetime.now().strftime('%Y-%m-%d')
         subject = f"珠三角{report_type} {today}"
 
+        # Python 3.11 的 f-string 表达式里不允许出现反斜杠，
+        # 所以先把换行替换做好，再拼进模板（原来直接写在 f-string 里会导致整个文件 SyntaxError）
+        content_html = content.replace('\n', '<br>')
+
         html_content = f"""
         <html>
         <head><meta charset="UTF-8"></head>
@@ -106,7 +110,7 @@ def send_email(content, report_type="日报"):
             <p><b>生成时间：</b>{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
             <hr>
             <div style="white-space: pre-wrap; font-size: 14px; line-height: 1.8;">
-                {content.replace('\n', '<br>')}
+                {content_html}
             </div>
             <hr>
             <p style="color: #999; font-size: 12px;">此邮件由珠三角房产智能问答系统自动生成。</p>

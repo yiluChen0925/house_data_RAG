@@ -1,10 +1,14 @@
 # ====================== MySQL配置（保留） ======================
+# 注：这套配置最初从早期爬虫项目复用而来。
+# 密码改为从环境变量读取，不再硬编码在源码里。
+import os
+
 MYSQL_CONFIG = {
-    "host": "localhost",
-    "port": 3306,
-    "user": "root",
-    "password": "123456",        # 改成你的MySQL密码
-    "db": "dirty_data_table",          # 改成你实际的数据库名（你之前是dirty_data_table）
+    "host": os.getenv("MYSQL_HOST", "localhost"),
+    "port": int(os.getenv("MYSQL_PORT", "3306")),
+    "user": os.getenv("MYSQL_USER", "root"),
+    "password": os.getenv("MYSQL_PASSWORD", ""),   # ← 从环境变量读，勿写死
+    "db": os.getenv("MYSQL_DB", "dirty_data_table"),
     "charset": "utf8mb4"
 }
 
@@ -32,12 +36,6 @@ FILE_CONFIG = {
 # ====================== 保留（但不一定用） ======================
 BATCH_SIZE = 20
 
-# ====================== Redis配置（已弃用，保留注释） ======================
-# REDIS_CONFIG = {
-#     "host": "192.168.1.3",
-#     "port": 6379,
-#     "db": 0,
-#     "password": "123456",
-#     "decode_responses": True,
-#     "socket_timeout": 10
-# }
+# ====================== Redis配置（已弃用） ======================
+# 早期爬虫用过 Redis 做去重，这里已不再使用，故删除（原配置含明文口令）。
+# 如后续需要，用 os.getenv("REDIS_PASSWORD", "") 从环境变量读取。

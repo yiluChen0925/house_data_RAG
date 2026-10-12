@@ -6,6 +6,7 @@
 
 import os
 import re
+import sys
 import json
 import datetime
 from bs4 import BeautifulSoup
@@ -351,20 +352,33 @@ def batch_parse_wuba_html(root_path, date_str=None):
     return results
 
 
-if __name__ == "__main__":
-    ROOT_PATH = r"D:\MyProject\house_data_RAG\1_data\raw_html"
-    today = datetime.datetime.now().strftime('%Y%m%d')
-    data = batch_parse_wuba_html(ROOT_PATH, today)
-    if data:
-        df = pd.DataFrame(data)
+def parse_and_save(date_str, base_path=None, verbose=True):
+    """解析指定日期的 wuba HTML 并写入 daily_raw，返回 DataFrame（无数据时返回 None）。
+
+    抽出来是为了让 daily_ingest 能复用；__main__ 的行为保持不变。
+    """
+    if base_path is None:
+        base_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    root_path = os.path.join(base_path, "1_data", "raw_html")
+    data = batch_parse_wuba_html(root_path, date_str)
+    if not data:
+        return None
+    df = pd.DataFrame(data)
+    if verbose:
         print("字段列表: " + str(df.columns.tolist()))
         print("共 " + str(len(df)) + " 条数据")
-        print("数据预览:")
-        print(df.head())
-        output_dir = r"D:\MyProject\house_data_RAG\1_data\daily_raw"
-        os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, f"wuba_ershou_{today}.csv")
-        df.to_csv(output_path, index=False, encoding='utf-8-sig')
+    output_dir = os.path.join(base_path, "1_data", "daily_raw")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "wuba_ershou_" + date_str + ".csv")
+    df.to_csv(output_path, index=False, encoding='utf-8-sig')
+    if verbose:
         print("已保存到: " + output_path)
-    else:
+    return df
+
+
+if __name__ == "__main__":
+    # 日期可用命令行参数指定：python html_parser.py 20260818
+    today = sys.argv[1] if len(sys.argv) > 1 else datetime.datetime.now().strftime('%Y%m%d')
+    result = parse_and_save(today)
+    if result is None:
         print("没有解析到任何数据")

@@ -1,148 +1,117 @@
 # -*- coding: utf-8 -*-
 """
 每日增量追加脚本 - 每天运行一次
-从 daily_raw 读取今天的新数据，清洗后追加到 house_cleaned.csv
+
+从 1_data/daily_raw 读取今天的新数据，清洗后追加到 house_cleaned.csv。
+
+改动要点：
+    原来这个脚本自带一份 read_daily_raw()，按字段名映射——方向是对的，但和
+    merge_and_clean.py 各写一份，两边的映射会各自漂移（例如 region_name 没被
+    映射、户型混朝向的问题只在一边修）。现在统一复用 merge_and_clean 的读取
+    与清洗逻辑，只保留"追加 + 去重"这部分增量特有的行为。
 """
 
-import pandas as pd
-import numpy as np
+import datetime
 import glob
 import os
-import datetime
-from ETL_cleaners import clean_numeric
+import sys
 
-# ==================== 路径配置 ====================
-BASE_PATH = r"D:\MyProject\house_data_RAG"
-DAILY_RAW_FOLDER = os.path.join(BASE_PATH, "1_data", "daily_raw")
-CLEANED_FOLDER = os.path.join(BASE_PATH, "1_data", "cleaned_data")
-OUTPUT_FILE = os.path.join(CLEANED_FOLDER, "house_cleaned.csv")
+import pandas as pd
 
-os.makedirs(DAILY_RAW_FOLDER, exist_ok=True)
-os.makedirs(CLEANED_FOLDER, exist_ok=True)
+# 允许以脚本方式直接运行（python 2_scripts/etl/merge_and_clean_today.py）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-COMMON_FIELDS = ["城市", "区域", "户型", "总价", "面积", "单价", "小区名称", "爬取时间"]
-
-
-def clean_and_fix(df):
-    """清洗和推算逻辑（与初始脚本一致）"""
-    for field in ["总价", "面积", "单价"]:
-        if field in df.columns:
-            df[field] = df[field].apply(clean_numeric)
-        else:
-            df[field] = np.nan
-
-    mask = (df["总价"] > 0) & (df["面积"] > 0) & (pd.isna(df["单价"]) | (df["单价"] == 0))
-    df.loc[mask, "单价"] = df.loc[mask, "总价"] * 10000 / df.loc[mask, "面积"]
-
-    mask = (df["单价"] > 0) & (df["面积"] > 0) & (pd.isna(df["总价"]) | (df["总价"] == 0))
-    df.loc[mask, "总价"] = df.loc[mask, "单价"] * df.loc[mask, "面积"] / 10000
-
-    mask = (df["总价"] > 0) & (df["单价"] > 0) & (pd.isna(df["面积"]) | (df["面积"] == 0))
-    df.loc[mask, "面积"] = df.loc[mask, "总价"] * 10000 / df.loc[mask, "单价"]
-
-    if "区域" in df.columns and df["区域"].notna().any():
-        valid = df[df["区域"].notna() & (df["单价"] > 0)]
-        if not valid.empty:
-            df_region_avg = valid.groupby(["城市", "区域"])["单价"].median().reset_index()
-            df_region_avg.rename(columns={"单价": "区域均价"}, inplace=True)
-            df = pd.merge(df, df_region_avg, on=["城市", "区域"], how="left")
-
-            if "区域均价" in df.columns:
-                mask_anomaly = (
-                    (df["单价"] > 0) &
-                    (df["区域均价"] > 0) &
-                    (np.abs(df["单价"] - df["区域均价"]) / df["区域均价"] > 0.5)
-                )
-                df.loc[mask_anomaly, "单价"] = df.loc[mask_anomaly, "区域均价"]
-                mask_fix_total = mask_anomaly & (df["面积"] > 0)
-                df.loc[mask_fix_total, "总价"] = df.loc[mask_fix_total, "单价"] * df.loc[mask_fix_total, "面积"] / 10000
-                df.drop(columns=["区域均价"], inplace=True, errors="ignore")
-
-    for col in ["总价", "面积", "单价"]:
-        if col in df.columns:
-            df[col] = df[col].round(2)
-
-    return df
+from merge_and_clean import (  # noqa: E402
+    DEFAULT_BASE_PATH,
+    clean_and_fix,
+    get_paths,
+    identify_source,
+    read_source,
+)
 
 
-def read_daily_raw(file):
-    """读取 daily_raw 目录下的 CSV，映射到 COMMON_FIELDS"""
-    df = pd.read_csv(file, encoding='utf-8-sig')
-
-    column_mapping = {
-        "crawl_time": "爬取时间",
-        "community_name": "小区名称",
-        "house_layout": "户型",
-        "build_area": "面积",
-        "total_price": "总价",
-        "unit_price": "单价",
-        "house_area": "区域",
-        "city_name": "城市",
-    }
-    df = df.rename(columns=column_mapping)
-
-    for col in COMMON_FIELDS:
-        if col not in df.columns:
-            df[col] = None
-
-    df["数据来源"] = "daily_raw"
-
-    keep_cols = COMMON_FIELDS + ["数据来源"]
-    df = df[keep_cols]
-
-    return df
+def get_daily_folder(base_path=None):
+    base = base_path or DEFAULT_BASE_PATH
+    return os.path.join(base, "1_data", "daily_raw")
 
 
-def load_existing_data():
-    """加载已有的 house_cleaned.csv"""
-    if os.path.exists(OUTPUT_FILE):
-        return pd.read_csv(OUTPUT_FILE, encoding='utf-8-sig')
-    else:
-        print("未找到已存在的 house_cleaned.csv，请先运行 merge_initial.py")
-        return pd.DataFrame()
+def load_existing_data(output_file):
+    """加载已有的 house_cleaned.csv。"""
+    if os.path.exists(output_file):
+        return pd.read_csv(output_file, encoding='utf-8-sig')
+    print("未找到已存在的 house_cleaned.csv，本次将直接写入新数据")
+    return pd.DataFrame()
 
 
-def main():
-    today_str = datetime.datetime.now().strftime('%Y%m%d')
-
-    print("开始处理今日数据: " + today_str)
-
-    daily_files = glob.glob(os.path.join(DAILY_RAW_FOLDER, f"*{today_str}*.csv"))
-    if not daily_files:
-        print("今日没有新数据，无需追加")
-        return
-
-    df_new_list = []
-    for file in daily_files:
-        print("读取: " + os.path.basename(file))
-        df = read_daily_raw(file)
-        df_new_list.append(df)
-
-    df_new = pd.concat(df_new_list, ignore_index=True)
-    print("今日新增: " + str(len(df_new)) + " 条")
-
-    df_new = clean_and_fix(df_new)
-
-    df_existing = load_existing_data()
-    if df_existing.empty:
-        print("未找到已有数据，建议先运行 merge_initial.py 初始化")
-        df_new.to_csv(OUTPUT_FILE, index=False, encoding='utf-8-sig')
-        print("已保存 " + str(len(df_new)) + " 条数据到 " + OUTPUT_FILE)
-        return
-
+def dedupe(df_new, df_existing):
+    """有房源编码就按编码去重；否则按 (城市, 小区名称, 户型, 总价) 兜底。"""
+    if df_new.empty or df_existing.empty:
+        return df_new
     if "房源编码" in df_new.columns and "房源编码" in df_existing.columns:
-        existing_codes = set(df_existing["房源编码"].dropna())
-        df_new = df_new[~df_new["房源编码"].isin(existing_codes)]
-        print("去重后保留: " + str(len(df_new)) + " 条新数据")
+        existing = set(df_existing["房源编码"].dropna())
+        return df_new[~df_new["房源编码"].isin(existing)]
+    key_cols = [c for c in ["城市", "小区名称", "户型", "总价"] if c in df_new.columns]
+    if not key_cols:
+        return df_new
+    existing_keys = set(map(tuple, df_existing[key_cols].astype(str).values))
+    new_keys = list(map(tuple, df_new[key_cols].astype(str).values))
+    return df_new[[k not in existing_keys for k in new_keys]]
 
-    df_combined = pd.concat([df_existing, df_new], ignore_index=True)
-    df_combined.to_csv(OUTPUT_FILE, index=False, encoding='utf-8-sig')
+
+def main(base_path=None, date_str=None, verbose=True):
+    base = base_path or DEFAULT_BASE_PATH
+    daily_folder = get_daily_folder(base)
+    _, cleaned_folder, output_file = get_paths(base)
+    os.makedirs(daily_folder, exist_ok=True)
+    os.makedirs(cleaned_folder, exist_ok=True)
+
+    # date_str 可显式指定（daily_ingest 会传），默认今天
+    today_str = date_str or datetime.datetime.now().strftime('%Y%m%d')
+    print("开始处理数据日期: " + today_str)
+    print("增量目录: " + daily_folder)
+
+    daily_files = sorted(glob.glob(os.path.join(daily_folder, "*" + today_str + "*.csv")))
+    if not daily_files:
+        print("该日期没有新数据，无需追加")
+        return None
+
+    frames = []
+    for file in daily_files:
+        name = os.path.basename(file)
+        source = identify_source(name)
+        if not source:
+            print("跳过无法识别来源的文件: " + name)
+            continue
+        print("读取: " + name + " -> " + source)
+        frames.append(read_source(file, source))
+
+    if not frames:
+        print("该日期文件都无法识别来源，无需追加")
+        return None
+
+    df_new = pd.concat(frames, ignore_index=True)
+    df_new["数据来源"] = "daily_raw"
+    print("该日期新增: " + str(len(df_new)) + " 条")
+
+    df_new = clean_and_fix(df_new, verbose=False)
+
+    df_existing = load_existing_data(output_file)
+    df_new = dedupe(df_new, df_existing)
+    print("去重后保留: " + str(len(df_new)) + " 条")
+
+    if df_new.empty:
+        print("该日期数据已全部存在，无需追加")
+        return df_existing
+
+    df_combined = pd.concat([df_existing, df_new], ignore_index=True) if not df_existing.empty else df_new
+    df_combined.to_csv(output_file, index=False, encoding='utf-8-sig')
 
     print("追加完成")
     print("   - 原有数据: " + str(len(df_existing)) + " 条")
-    print("   - 今日新增: " + str(len(df_new)) + " 条")
+    print("   - 新增: " + str(len(df_new)) + " 条")
     print("   - 合并后: " + str(len(df_combined)) + " 条")
-    print("已保存至: " + OUTPUT_FILE)
+    print("已保存至: " + output_file)
+    return df_combined
 
 
 if __name__ == "__main__":

@@ -13,9 +13,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'rag'))
 
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
+import _offline_setup  # noqa: F401  必须早于 sentence_transformers，见该模块说明
 
 # ==================== 配置 ====================
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
