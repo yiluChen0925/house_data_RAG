@@ -86,7 +86,7 @@ class FtxErShou(Base):
 class WubaErShou(Base):
     __tablename__ = "wuba_ershou"  # 保留原表名
 
-    # 👇 核心修改：house_area从Float改为String（因为是区域文本）
+    # 核心修改：house_area从Float改为String（因为是区域文本）
     auto_id = Column(Integer, primary_key=True, autoincrement=True, comment="自增ID（唯一）")
     id = Column(String(64), nullable=True, default=None, comment="58房源ID（verification_code）")
     verification_code = Column(String(64), nullable=True, default=None, comment="房源唯一标识（核验码）")
@@ -98,7 +98,7 @@ class WubaErShou(Base):
     error_msg = Column(String(255), nullable=True, default=None, comment="错误信息")
     community_name = Column(String(64), nullable=True, default=None, comment="小区名称")
     house_layout = Column(String(32), nullable=True, default=None, comment="户型（layout）")
-    house_area = Column(String(32), nullable=True, default=None, comment="所属区域")  # ✅ 改Float→String
+    house_area = Column(String(32), nullable=True, default=None, comment="所属区域")
     total_price = Column(Float, default=0.0, comment="总价（万）")
     property_right = Column(String(32), nullable=True, default=None, comment="产权性质")
     property_type = Column(String(32), nullable=True, default=None, comment="物业类型")
@@ -132,7 +132,7 @@ class WubaErShou(Base):
 class FtxXinFang(Base):
     __tablename__ = "ftx_xinfang"
 
-    # 👇 核心主键：自增ID（数据库内部唯一）+ 业务唯一约束（id+crawl_time）
+    # 核心主键：自增ID（数据库内部唯一）+ 业务唯一约束（id+crawl_time）
     auto_id = Column(Integer, primary_key=True, autoincrement=True, comment="自增ID（唯一）")
     id = Column(String(64), nullable=True, default=None, comment="楼盘唯一标识（Redis主键）")  # 允许为空+默认None，避免无值报错
 
@@ -214,7 +214,7 @@ class FtxXinFang(Base):
 class FtxChengJiao(Base):
     __tablename__ = "ftx_chengjiao"
 
-    # 👇 核心主键：自增ID + 业务唯一约束（id+crawl_time）
+    # 核心主键：自增ID + 业务唯一约束（id+crawl_time）
     auto_id = Column(Integer, primary_key=True, autoincrement=True, comment="自增ID（唯一）")
     id = Column(String(64), nullable=True, default=None, comment="成交房源唯一标识（Redis主键）")  # 允许为空+默认None，避免无值报错
 
@@ -281,11 +281,11 @@ async def get_async_mysql_engine(config):
     # 异步建表
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    # ✅ 关键：创建工厂类，不创建实例
+    # 创建工厂类，不创建实例
     AsyncSessionLocal = sessionmaker(
         bind=engine,
         class_=AsyncSession,
         expire_on_commit=False
     )
-    # ✅ 返回引擎 + 工厂类（不是实例）
+    # 返回引擎 + 工厂类（不是实例）
     return engine, AsyncSessionLocal
